@@ -1,0 +1,21 @@
+[package]
+authors     = ["Darwinia Network <hello@darwinia.network>"]
+description = "Sparse Merkle Tree"
+edition     = "2021"
+homepage    = "https://darwinia.network"
+license     = "GPL-3.0"
+name        = "sparse-merkle-tree"
+readme      = "README.md"
+repository  = "https://github.com/darwinia-network/sparse-merkle-tree"
+version     = "0.1.0"
+
+[dependencies]
+# crates.io
+log               = { version = "0.4", optional = true }
+pretty_env_logger = { version = "0.4", optional = true }
+
+[features]
+debug = [
+	"log",
+	"pretty_env_logger",
+]

@@ -1,0 +1,25 @@
+name: Checks
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  RUST_TOOLCHAIN: nightly
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Rust ${{ env.RUST_TOOLCHAIN }} toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          default: true
+      - name: Fetch latest code
+        uses: actions/checkout@v2
+      - name: Test
+        run: RUST_LOG=debug cargo t --locked --features debug,keccak

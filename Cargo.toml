@@ -7,15 +7,16 @@ license     = "GPL-3.0"
 name        = "sparse-merkle-tree"
 readme      = "README.md"
 repository  = "https://github.com/darwinia-network/sparse-merkle-tree"
-version     = "0.1.0"
+version     = "0.2.0"
 
 [dependencies]
 # crates.io
-log               = { version = "0.4", optional = true }
-pretty_env_logger = { version = "0.4", optional = true }
+log         = { version = "0.4" }
+tiny-keccak = { version = "2.0", optional = true }
+
+[dev-dependencies]
+pretty_env_logger = { version = "0.4" }
 
 [features]
-debug = [
-	"log",
-	"pretty_env_logger",
-]
+debug  = []
+keccak = ["tiny-keccak/keccak"]

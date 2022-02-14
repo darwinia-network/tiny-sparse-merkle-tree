@@ -4,10 +4,10 @@ description = "Sparse Merkle Tree"
 edition     = "2021"
 homepage    = "https://darwinia.network"
 license     = "GPL-3.0"
-name        = "sparse-merkle-tree"
+name        = "tiny-sparse-merkle-tree"
 readme      = "README.md"
-repository  = "https://github.com/darwinia-network/sparse-merkle-tree"
-version     = "0.3.0"
+repository  = "https://github.com/darwinia-network/tiny-sparse-merkle-tree"
+version     = "0.4.0"
 
 [dependencies]
 # crates.io

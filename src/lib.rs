@@ -2,59 +2,20 @@
 
 extern crate alloc;
 
-// --- core ---
-use core::{fmt::Debug, marker::PhantomData};
-// --- alloc ---
-use alloc::vec::Vec;
-
-#[cfg(any(feature = "keccak"))]
-pub mod hash {
-	#[cfg(feature = "keccak")]
-	pub mod keccak {
-		// --- crates.io ---
-		use tiny_keccak::{Hasher as _, Keccak};
-		// --- sparse-merkle-tree ---
-		use crate::*;
-
-		pub struct Keccak256;
-		impl<'d> Hasher<'d> for Keccak256 {
-			type Data = &'d [u8];
-			type Hash = [u8; 32];
-
-			fn hash(data: Self::Data) -> Self::Hash {
-				let mut keccak = Keccak::v256();
-				let mut output = [0u8; 32];
-
-				keccak.update(data);
-				keccak.finalize(&mut output);
-
-				output
-			}
-
-			fn merge(l: &Self::Hash, r: &Self::Hash) -> Self::Hash {
-				let mut m = [0u8; 64];
-
-				m[..32].copy_from_slice(l);
-				m[32..].copy_from_slice(r);
-
-				Self::hash(&m)
-			}
-		}
-	}
-	#[cfg(feature = "keccak")]
-	pub use keccak::*;
-}
-
+#[cfg(any(test, feature = "keccak"))]
+pub mod hash;
 #[cfg(test)]
 mod tests;
 
-pub trait Hasher<'d> {
-	type Data;
-	type Hash;
+// --- core ---
+use core::fmt::Debug;
+// --- alloc ---
+use alloc::vec::Vec;
 
-	fn hash(data: Self::Data) -> Self::Hash;
+pub trait Merge {
+	type Item;
 
-	fn merge(l: &Self::Hash, r: &Self::Hash) -> Self::Hash;
+	fn merge(l: &Self::Item, r: &Self::Item) -> Self::Item;
 }
 
 /// > Assume the hash algorithm is `a + b`.
@@ -75,21 +36,20 @@ pub trait Hasher<'d> {
 /// [0,1+2+3+4,1+2,3+4,1,2,3,4]
 /// ```
 #[cfg_attr(all(feature = "debug", not(test)), derive(Debug))]
-pub struct SparseMerkleTree<H, Hs> {
+pub struct SparseMerkleTree<H> {
 	pub nodes: Vec<H>,
 	pub non_empty_leaves_count: u32,
-	_phantom_data: PhantomData<Hs>,
 }
-impl<'d, H, Hs> SparseMerkleTree<H, Hs>
+impl<H> SparseMerkleTree<H>
 where
 	H: Clone + Debug + Default + PartialEq,
-	Hs: Hasher<'d, Hash = H>,
 {
-	pub fn new<T>(leaves: &'d [T]) -> Self
+	pub fn new<L, M>(leaves: L) -> Self
 	where
-		Hs: Hasher<'d, Data = &'d T>,
+		L: Iterator<Item = H>,
+		M: Merge<Item = H>,
 	{
-		let non_empty_leaves_count = leaves.len() as u32;
+		let non_empty_leaves_count = leaves.size_hint().0 as u32;
 		let half_leaves_count = non_empty_to_half_leaves_count(non_empty_leaves_count);
 		let leaves_count = half_leaves_count * 2;
 		let mut nodes = Vec::with_capacity(leaves_count as _);
@@ -103,7 +63,7 @@ where
 		// Fill the empty leaves.
 		(0..half_leaves_count).for_each(|_| nodes.push(Default::default()));
 		// Fill the leaves.
-		leaves.iter().for_each(|leaf| nodes.push(Hs::hash(leaf)));
+		leaves.for_each(|leaf| nodes.push(leaf));
 		// Fill the empty leaves.
 		// `x.next_power_of_two()` must grater/equal than/to `x`; qed
 		(0..half_leaves_count - non_empty_leaves_count)
@@ -114,13 +74,12 @@ where
 			let l = &nodes[i * 2];
 			let r = &nodes[i * 2 + 1];
 
-			nodes[i] = Hs::merge(l, r);
+			nodes[i] = M::merge(l, r);
 		});
 
 		Self {
 			nodes,
 			non_empty_leaves_count,
-			_phantom_data: Default::default(),
 		}
 	}
 
@@ -150,7 +109,11 @@ where
 	// leaves  0 0 0 0 0 0 0 0 1 2 3 4 5 0 0 0
 	// indices                 0 1 2 3 4 5 6 7
 	/// ```
-	pub fn proof_of(&self, indices: &[u32]) -> Proof<H> {
+	pub fn proof_of<I>(&self, indices: I) -> Proof<H>
+	where
+		I: AsRef<[u32]>,
+	{
+		let indices = indices.as_ref();
 		let leaves_count = self.leaves_count();
 		let half_leaves_count = leaves_count / 2;
 
@@ -187,7 +150,6 @@ where
 		});
 
 		Proof {
-			half_leaves_count,
 			root: self.root(),
 			leaves_with_index: indices
 				.iter()
@@ -201,9 +163,11 @@ where
 		}
 	}
 
-	pub fn verify(proof: Proof<H>) -> bool {
+	pub fn verify<M>(proof: Proof<H>) -> bool
+	where
+		M: Merge<Item = H>,
+	{
 		let Proof {
-			half_leaves_count,
 			root,
 			leaves_with_index: mut nodes_with_indices,
 			proof,
@@ -215,7 +179,6 @@ where
 
 		#[cfg(feature = "debug")]
 		{
-			log::debug!("verify::half_leaves_count: {:?}", half_leaves_count);
 			log::debug!("verify::root: {:?}", root);
 			log::debug!("verify::nodes_with_indices: {:?}", nodes_with_indices);
 			log::debug!("verify::proof: {:?}", proof);
@@ -241,8 +204,7 @@ where
 					return false;
 				}
 
-				nodes_with_indices
-					.push((i / 2, Hs::merge(&nodes_with_indices[n_j].1, &proof[p_i])));
+				nodes_with_indices.push((i / 2, M::merge(&nodes_with_indices[n_j].1, &proof[p_i])));
 				p_i += 1;
 			}
 			// Check the next node if exists.
@@ -250,7 +212,7 @@ where
 			else if n_i != nodes_with_indices.len() && nodes_with_indices[n_i].0 == i - 1 {
 				nodes_with_indices.push((
 					i / 2,
-					Hs::merge(&nodes_with_indices[n_j].1, &nodes_with_indices[n_i].1),
+					M::merge(&nodes_with_indices[n_i].1, &nodes_with_indices[n_j].1),
 				));
 				n_i += 1;
 			} else {
@@ -258,8 +220,7 @@ where
 					return false;
 				}
 
-				nodes_with_indices
-					.push((i / 2, Hs::merge(&proof[p_i], &nodes_with_indices[n_j].1)));
+				nodes_with_indices.push((i / 2, M::merge(&proof[p_i], &nodes_with_indices[n_j].1)));
 				p_i += 1;
 			}
 
@@ -277,7 +238,6 @@ pub struct Proof<H>
 where
 	H: Default,
 {
-	half_leaves_count: u32,
 	root: H,
 	leaves_with_index: Vec<(u32, H)>,
 	proof: Vec<H>,

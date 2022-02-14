@@ -1,30 +1,23 @@
+#[cfg(feature = "keccak")]
+mod keccak;
+
 // --- core ---
 use core::fmt::{Debug, Formatter, Result};
 // --- sparse-merkle-tree ---
-use crate::*;
+use crate::{hash::test::*, *};
 
-type TestSparseMerkleTrie = SparseMerkleTree<u32, ()>;
-
-impl<'d> Hasher<'d> for () {
-	type Data = &'d u32;
-	type Hash = u32;
-
-	fn hash(data: Self::Data) -> Self::Hash {
-		*data
-	}
-
-	fn merge(l: &Self::Hash, r: &Self::Hash) -> Self::Hash {
-		*l + *r
-	}
-}
+type TestSparseMerkleTrie = SparseMerkleTree<u32>;
 
 impl TestSparseMerkleTrie {
-	fn new_with_leaves_count(half_leaves_count: u32) -> Self {
+	fn new_with_leaves_count<T>(half_leaves_count: u32) -> Self
+	where
+		T: Merge<Item = u32>,
+	{
 		let mut leaves = Vec::new();
 
 		(1..=half_leaves_count).for_each(|i| leaves.push(i));
 
-		TestSparseMerkleTrie::new(&leaves)
+		TestSparseMerkleTrie::new::<_, T>(leaves.into_iter())
 	}
 }
 impl Debug for TestSparseMerkleTrie {
@@ -84,7 +77,7 @@ fn smt_should_work() {
 	//    0       0       10      5
 	//  0   0   0   0   3   7   5   0
 	// 0 0 0 0 0 0 0 0 1 2 3 4 5 0 0 0
-	let smt = TestSparseMerkleTrie::new_with_leaves_count(5);
+	let smt = TestSparseMerkleTrie::new_with_leaves_count::<DebugView>(5);
 
 	#[cfg(feature = "debug")]
 	log::debug!("{:?}", smt);
@@ -108,7 +101,8 @@ fn proof_should_work() {
 	//          0   0   3   7
 	// leaves  0 0 0 0 1 2 3 4
 	// indices         0 1 2 3
-	let mut debug_proof = TestProof::of_smt(TestSparseMerkleTrie::new_with_leaves_count(4));
+	let mut debug_proof =
+		TestProof::of_smt(TestSparseMerkleTrie::new_with_leaves_count::<DebugView>(4));
 
 	[
 		([0].as_ref(), [2, 7].as_ref()),
@@ -139,7 +133,8 @@ fn proof_should_work() {
 	//          0   0   0   0   3   7   5   0
 	// leaves  0 0 0 0 0 0 0 0 1 2 3 4 5 0 0 0
 	// indices                 0 1 2 3 4 5 6 7
-	let mut debug_proof = TestProof::of_smt(TestSparseMerkleTrie::new_with_leaves_count(5));
+	let mut debug_proof =
+		TestProof::of_smt(TestSparseMerkleTrie::new_with_leaves_count::<DebugView>(5));
 
 	[
 		([0].as_ref(), [2, 7, 5].as_ref()),
@@ -181,16 +176,7 @@ fn proof_should_work() {
 #[test]
 fn verify_should_work() {
 	let _ = pretty_env_logger::try_init();
-	//                             15
-	//                     0               15
-	//                 0       0       10      5
-	//               0   0   0   0   3   7   5   0
-	// leaves       0 0 0 0 0 0 0 0 1 2 3 4 5 0 0 0
-	// indices                      0 1 2 3 4 5 6 7
-	// node indices 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
-	let smt = TestSparseMerkleTrie::new_with_leaves_count(5);
-
-	[
+	let indices_set = [
 		[0].as_ref(),
 		&[0, 1],
 		&[0, 2],
@@ -215,16 +201,37 @@ fn verify_should_work() {
 		&[0, 1, 2, 4],
 		&[0, 2, 3, 4],
 		&[0, 1, 2, 3, 4],
-	]
-	.iter()
-	.for_each(|indices| {
+	];
+
+	//                             15
+	//                     0               15
+	//                 0       0       10      5
+	//               0   0   0   0   3   7   5   0
+	// leaves       0 0 0 0 0 0 0 0 1 2 3 4 5 0 0 0
+	// indices                      0 1 2 3 4 5 6 7
+	// node indices 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
+	let smt = TestSparseMerkleTrie::new_with_leaves_count::<DebugView>(5);
+
+	indices_set.iter().for_each(|indices| {
 		let mut proof = smt.proof_of(indices);
 		let mut indices = indices.to_vec();
 
 		proof.sort();
 		indices.sort_by(|a, b| b.cmp(a));
 
-		assert!(TestSparseMerkleTrie::verify(proof));
-		assert!(TestSparseMerkleTrie::verify(smt.proof_of(&indices)));
+		assert!(TestSparseMerkleTrie::verify::<DebugView>(proof));
+		assert!(TestSparseMerkleTrie::verify::<DebugView>(
+			smt.proof_of(&indices)
+		));
+	});
+
+	let smt = TestSparseMerkleTrie::new_with_leaves_count::<CheckMergeOrder>(5);
+
+	indices_set.iter().for_each(|indices| {
+		let mut proof = smt.proof_of(indices);
+
+		proof.sort();
+
+		assert!(TestSparseMerkleTrie::verify::<CheckMergeOrder>(proof));
 	});
 }
